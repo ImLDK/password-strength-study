@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/28390768/README.md)
 # A Computational Study of Password Strength and Vulnerability to Common Attack Methods
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)
