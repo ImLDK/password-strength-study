@@ -1,54 +1,73 @@
-# A Computational Study of Password Strength and Vulnerability to Common Attack Methods
+# The Illusion of Password Complexity
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)
-![Dataset](https://img.shields.io/badge/Dataset-1000%20passwords-orange)
+![Dataset](https://img.shields.io/badge/Dataset-RockYou%2010k-orange)
 ![Type](https://img.shields.io/badge/Type-Simulation--Based%20Research-purple)
 ![Status](https://img.shields.io/badge/Status-Complete-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 > **Simulation-based computational study.**  
-> No live systems, real passwords, or cracking tools were used at any point.
+> No live systems, real cracking tools, or unauthorized access used at any point.
 
 ---
 
-## The Core Finding
+## The Question
 
-> **72% of passwords that score Moderate or Strong on standard entropy metrics  
-> are deceptive — they contain a recognizable dictionary base word and would be  
-> cracked quickly by rule-based attacks.**
+Most websites enforce password complexity rules:
 
-We expected entropy metrics to be a reliable security indicator.  
-They are not — for nearly three quarters of "high-scoring" passwords.
+- Minimum 8 characters
+- At least one uppercase letter
+- At least one digit
+- At least one symbol
+
+A password like `Password1!` satisfies all four.  
+Does that make it secure?
+
+> *Do common password complexity requirements produce passwords that are  
+> actually resistant to rule-based dictionary attacks?*
 
 ---
 
-## Overview
+## Key Finding
 
-This project investigates a fundamental question about password security tooling:
+Of passwords that pass **all four** complexity rules:
 
-> *Do standard entropy-based strength metrics accurately predict resistance to rule-based dictionary attacks, or do they systematically overestimate the security of structured substitution passwords?*
+- The majority contain a recognizable dictionary base word
+- These remain highly vulnerable to rule-based dictionary attacks despite satisfying all requirements
+- Complexity rules correctly identify genuinely unpredictable passwords only in a minority of cases
 
-Using a 1,000-password dataset modeled on documented RockYou distribution patterns, the study compares **entropy-based strength scores** against **rule-based attack resistance** — and finds a systematic gap.
+**Complexity rules measure form, not unpredictability.**
+
+---
+
+## Why This Matters
+
+This finding is consistent with the direction of NIST SP 800-63B (2017), which moved away from mandatory complexity rules — partly because they encourage predictable substitution patterns:
+
+| Password | Passes rules | Has dict base | Verdict |
+|---|---|---|---|
+| `password` | ✗ | ✓ | Weak — obvious |
+| `Password1!` | ✓ | ✓ | **False secure** |
+| `P@ssw0rd` | ✓ | ✓ | **False secure** |
+| `Admin2024!` | ✓ | ✓ | **False secure** |
+| `X7#kP2!zQ` | ✓ | ✗ | Genuinely strong |
+
+The problem: users follow the rules and receive a green checkmark — but the underlying password structure remains predictable.
 
 ---
 
 ## Repository Structure
 
 ```
-password-strength-study/
+complexity-illusion-study/
 │
-├── password_analysis.py     # Core model: 13 passwords, 5 categories (original study)
-├── generate_dataset.py      # Generates 1000-password research dataset
-├── large_analysis.py        # Large-scale analysis engine
+├── complexity_analysis.py   # Main analysis script
 │
 ├── data/
-│   ├── passwords.csv        # Original 13-password dataset
-│   └── passwords_large.csv  # 1000-password dataset (auto-generated)
+│   └── rockyou-top10k.txt   # Password dataset (add your own — see below)
 │
 ├── results/
-│   ├── summary.md           # Key findings + tables
-│   ├── results.csv          # Original study output
-│   └── large_results.csv    # Large-scale analysis output
+│   └── complexity_results.csv  # Auto-generated output
 │
 └── docs/
     └── paper.md             # Full research paper
@@ -61,102 +80,80 @@ password-strength-study/
 **Requirements:** Python 3.8+ (no external libraries needed)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/password-strength-study.git
-cd password-strength-study
+git clone https://github.com/YOUR_USERNAME/complexity-illusion-study.git
+cd complexity-illusion-study
 
-# Run original 13-password study
-python password_analysis.py
+# Add your dataset (see note below)
+# Then run:
+python complexity_analysis.py --file data/rockyou-top10k.txt
 
-# Generate dataset + run large-scale analysis
-python generate_dataset.py
-python large_analysis.py
-
-# Use a real password file (e.g. RockYou)
-python large_analysis.py --file rockyou.txt --limit 10000
+# Limit to first 5000 passwords:
+python complexity_analysis.py --file data/rockyou-top10k.txt --limit 5000
 ```
 
----
-
-## Key Results
-
-### Large-scale analysis (1,000 passwords)
-
-| Metric score | Count | Of these: genuinely strong | Of these: deceptive |
-|---|---|---|---|
-| Critical | 312 (31.2%) | 312 | 0 |
-| Weak | 445 (44.5%) | 445 | 0 |
-| Moderate | 182 (18.2%) | 51 | **131 (72%)** |
-| Strong | 61 (6.1%) | 17 | **44 (72%)** |
-
-**72% of Moderate/Strong passwords are deceptive.**
-
-### The deceptive password problem
-
-| Password | Entropy score | Metric says | Reality | Δ log₁₀ |
-|---|---|---|---|---|
-| `Christopher1985` | 26.9 | Strong | Critical | ~25 |
-| `Sp1d3rm@n!` | 19.7 | Strong | Critical | ~18 |
-| `Jessica1985` | 19.7 | Strong | Critical | ~18 |
-| `spiderman123` | 18.7 | Strong | Critical | ~17 |
-
-### Length vs real security — unexpected finding
-
-- **31.0%** of passwords with length ≥ 8 are still Critical or Weak in reality
-- Their average entropy score: **13.82 log₁₀** (rated *Moderate* by metrics)
-- Length alone does not predict resistance to rule-based attacks
+**Getting the dataset:**  
+This study uses the publicly available RockYou top-10k password list from  
+[SecLists](https://github.com/danielmiessler/SecLists/blob/master/Passwords/Common-Credentials/10-million-password-list-top-10000.txt).  
+Download and place at `data/rockyou-top10k.txt`.
 
 ---
 
 ## Methodology
 
-### Two metrics compared
+### Complexity Rules Modeled
 
-| Metric | Formula | What it measures |
-|---|---|---|
-| Entropy score | `log₁₀(charset ^ length)` | Theoretical possibility space |
-| Rule-based resistance | Dictionary lookup + leet-rule detection | Real attacker behavior |
+| Rule | Condition |
+|---|---|
+| Minimum length | ≥ 8 characters |
+| Has uppercase | At least one A–Z |
+| Has digit | At least one 0–9 |
+| Has symbol | At least one non-alphanumeric character |
 
-### Deceptive password detection
+These rules reflect common real-world requirements and closely resemble pre-2017 password policies.
 
-A password is classified as *deceptive* if:
-1. Its entropy score is ≥ Moderate (log₁₀ ≥ 13)
-2. Its base word (after reversing leet substitutions and stripping digits/symbols) exists in a frequency dictionary
+### Predictability Detection
 
-This models an attacker applying standard mutation rules (subset of hashcat best64 ruleset) to a base word list.
+A password is classified as **dict-based** (predictable) if:
 
-### Dataset
+1. After stripping leading/trailing digits and symbols, and reversing common leet substitutions (`@→a`, `3→e`, `1→i`, `0→o`, `$→s`), the resulting base string matches a word in a frequency dictionary
+2. Or the base string is a substring of a known common word (catches `mypassword`, `password123`, etc.)
 
-1,000 passwords generated according to documented RockYou category distribution patterns (Weir et al. 2009, Veras et al. 2014):
+This models the behavior of rule-based attack tools applying mutation rules to a base word list — without claiming specific attempt counts.
 
-| Category | Count | % |
-|---|---|---|
-| Simple dictionary | ~560 | 56% |
-| Name + year | ~180 | 18% |
-| Deceptive / leet | ~120 | 12% |
-| Keyboard patterns | ~80 | 8% |
-| Numeric / PIN | ~120 | 12% |
-| Truly random | ~50 | 5% |
+### What We Do Not Claim
+
+- We do not claim specific cracking times or attempt counts
+- We do not run real hash-cracking tools
+- "Vulnerable to rule-based attacks" means: *the base word is detectable by structural analysis*, which is a necessary condition for rule-based attacks to succeed — not a sufficient one
 
 ---
 
 ## Limitations
 
-- Rule-based detection uses a simplified model; real attack tools (hashcat) would achieve higher detection rates
-- Dataset is synthetically generated from documented patterns, not a live leaked corpus
-- Does not model GPU-accelerated parallel attacks
-- Dictionary covers ~1,000 base words; production tools use millions
+- Dictionary covers a subset of common words; a production attack tool would use millions
+- Leet-reversal covers common substitutions only; more exotic patterns may be missed
+- Does not model probabilistic context-free grammar (PCFG) attacks
+- Results depend on dataset composition; RockYou skews toward English-speaking users
+- Structural detection is a proxy for rule-based vulnerability, not a direct measurement
+
+---
+
+## Related Work
+
+This project is a companion study to  
+[password-strength-study](https://github.com/YOUR_USERNAME/password-strength-study) —  
+which investigates entropy metrics vs brute-force resistance across password categories.
 
 ---
 
 ## References
 
-- RockYou dataset (2009). Leaked password corpus (~14M entries).
-- Weir, M. et al. (2009). Password cracking using probabilistic context-free grammars. *IEEE S&P.*
+- NIST Special Publication 800-63B (2017). *Digital Identity Guidelines — Authentication and Lifecycle Management.*
+- Weir, M. et al. (2009). Password cracking using probabilistic context-free grammars. *IEEE S&P 2009.*
 - Veras, R. et al. (2014). On the semantic patterns of passwords. *NDSS 2014.*
 - Mazurek, M. et al. (2013). Measuring password guessability for an entire university. *CCS 2013.*
-- Hashcat project. best64.rule ruleset. https://github.com/hashcat/hashcat
-- NIST SP 800-63B (2017). Digital Identity Guidelines.
-- Shannon, C. E. (1948). A mathematical theory of communication. *Bell System Technical Journal.*
+- Ur, B. et al. (2012). How does your password measure up? *USENIX Security 2012.*
+- RockYou dataset (2009). Via SecLists: github.com/danielmiessler/SecLists
 
 ---
 
