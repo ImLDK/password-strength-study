@@ -1,195 +1,222 @@
+
 """
-A Computational Study of Password Strength and Vulnerability to Common Attack Methods
-Extended: The Deceptive Password Problem — entropy metrics vs rule-based attack resistance
+Large-scale password analysis — works on generated or real datasets.
 
-Simulation-based combinatorial analysis — no live systems or real cracking tools used.
-
-Author: Yelisey Yakymenko
-Year:   2025
+Usage:
+  python large_analysis.py                        # uses data/passwords_large.csv
+  python large_analysis.py --file rockyou.txt     # use real RockYou file
+  python large_analysis.py --limit 5000           # limit rows
 """
 
-import math
-import csv
-import os
+import math, csv, os, sys, argparse, collections
 
-# ── Dataset ────────────────────────────────────────────────────────────────────
+# ── Config ─────────────────────────────────────────────────────────────────────
 
-# (password, category, charset_size, dict_risk, dict_attempts, rule_based_attempts)
-#
-# rule_based_attempts: estimated attempts when attacker uses rule-based mutations
-# (leet substitution, case toggle, append digit/year/symbol) on a base dictionary.
-# None = password has no recognizable base word; rules don't apply.
+CRACK_SPEED = 1_000_000_000  # 10^9 attempts/second
 
-PASSWORDS = [
-    # Original categories
-    ("123456",       "Simple",     10,  "Very high", 1,       1),
-    ("qwerty",       "Simple",     26,  "Very high", 2,       2),
-    ("password",     "Simple",     26,  "Very high", 4,       4),
-    ("Anna2005",     "Name/year",  36,  "High",      5_000,   5_000),
-    ("Mike1998",     "Name/year",  36,  "High",      5_000,   5_000),
-    ("Alex2001",     "Name/year",  36,  "High",      5_000,   5_000),
-    ("S0lar!X9",     "Complex",    72,  "Medium",    None,    None),
-    ("X7#kP2!zQ",    "Random",     94,  "Very low",  None,    None),
-    ("@mR4$vN8!p",   "Random",     94,  "Very low",  None,    None),
+LEET_MAP = {'@':'a','3':'e','1':'i','0':'o','$':'s','7':'t','!':'i','8':'b'}
 
-    # NEW: Deceptive category — high entropy score, low real resistance
-    ("P@ssw0rd",     "Deceptive",  72,  "Very high", None,    23),
-    ("S3cur1ty!",    "Deceptive",  72,  "Very high", None,    31),
-    ("Adm1n@2024",   "Deceptive",  72,  "Very high", None,    48),
-    ("Tr0ub4dor&3",  "Deceptive",  72,  "Medium",    None,    120),
-]
-
-CRACK_SPEED = 1_000_000_000  # 10^9 attempts/second (modern GPU, simplified)
-
-# Common leet substitution rules (subset of hashcat best64 ruleset)
-LEET_RULES = {
-    'a': '@', 'e': '3', 'i': '1', 'o': '0',
-    's': '$', 't': '7', 'l': '1', 'b': '8'
+# Top-1000 base words (simulates checking against a frequency dictionary)
+# In a real study, replace with actual RockYou top-1000 list
+DICT_WORDS = {
+    "password","love","dragon","monkey","shadow","master","hello","welcome",
+    "sunshine","princess","football","baseball","soccer","hockey","tennis",
+    "batman","superman","spiderman","michael","jessica","ashley","letmein",
+    "iloveyou","trustno1","starwars","pokemon","jordan","harley","ranger",
+    "hunter","killer","buster","thomas","robert","andrew","daniel","george",
+    "samuel","joshua","kevin","brandon","zachary","austin","angel","flower",
+    "butter","cheese","purple","orange","yellow","silver","guitar","matrix",
+    "coffee","winter","summer","spring","tiger","eagle","wolf","panther",
+    "cobra","falcon","thunder","storm","blaze","flame","frost","admin",
+    "user","test","guest","login","secure","access","apple","google","qwerty",
+    "abc","xyz","pass","word","name","time","year","life","love","home",
+    # names
+    "anna","kate","emma","lisa","sara","mary","jane","rose","alex","ryan",
+    "john","mike","jake","luke","mark","paul","adam","eric","sean","kyle",
+    "chris","james","david","peter","brian","scott","kevin","jason","tyler",
 }
 
+# ── Core functions ─────────────────────────────────────────────────────────────
 
-# ── Core model ─────────────────────────────────────────────────────────────────
+def charset_size(pwd):
+    has_lower  = any(c.islower() for c in pwd)
+    has_upper  = any(c.isupper() for c in pwd)
+    has_digit  = any(c.isdigit() for c in pwd)
+    has_symbol = any(not c.isalnum() for c in pwd)
+    size = 0
+    if has_lower:  size += 26
+    if has_upper:  size += 26
+    if has_digit:  size += 10
+    if has_symbol: size += 32
+    return max(size, 10)
 
-def brute_force_space(charset_size: int, length: int) -> int:
-    """Total theoretical search space: charset_size ^ length."""
-    return charset_size ** length
+def entropy_score(pwd):
+    cs = charset_size(pwd)
+    return math.log10(cs ** len(pwd))
 
-
-def log10_space(space: int) -> float:
-    return math.log10(space)
-
-
-def estimated_time_seconds(space: int, speed: int = CRACK_SPEED) -> float:
-    return space / speed
-
-
-def strength_label(log10: float) -> str:
-    """
-    Strength classification derived from logarithmic brute-force space thresholds.
-    Comparative metric only — not an absolute security guarantee.
-    """
-    if log10 < 9:   return "Critical"
-    if log10 < 13:  return "Weak"
-    if log10 < 16:  return "Moderate"
+def strength_label(log10):
+    if log10 < 9:  return "Critical"
+    if log10 < 13: return "Weak"
+    if log10 < 16: return "Moderate"
     return "Strong"
 
+def deleet(pwd):
+    """Reverse leet: P@ssw0rd → password"""
+    return ''.join(LEET_MAP.get(c, c) for c in pwd.lower())
 
-def real_strength_label(log10_bf: float, rule_attempts) -> str:
+def base_word(pwd):
+    """Extract base word by stripping digits/symbols from ends and reversing leet."""
+    stripped = pwd.strip(r"0123456789!@#$%^&*_-+=")
+    deLeeted = deleet(stripped)
+    return deLeeted.lower()
+
+def is_deceptive(pwd):
     """
-    Real-world strength accounting for rule-based attacks.
-    If rule_attempts is known, uses that instead of brute-force space.
+    True if password scores >= Moderate on entropy but has a dictionary base word.
+    These are the passwords that fool entropy meters.
     """
-    if rule_attempts is not None:
-        if rule_attempts < 100:    return "Critical"
-        if rule_attempts < 10_000: return "Weak"
-        return "Moderate"
-    return strength_label(log10_bf)
+    log10 = entropy_score(pwd)
+    if log10 < 13:  # weak anyway, not deceptive
+        return False
+    base = base_word(pwd)
+    if base in DICT_WORDS:
+        return True
+    # Also check if the base (3+ chars) is a substring of a dict word
+    if len(base) >= 4:
+        for word in DICT_WORDS:
+            if base in word or word in base:
+                return True
+    return False
 
+def analyze_password(pwd):
+    log10  = entropy_score(pwd)
+    metric = strength_label(log10)
+    dec    = is_deceptive(pwd)
+    real   = "Critical" if dec else metric  # deceptive = always Critical in reality
+    gap    = (metric != real)
+    return {
+        "password":    pwd[:20],
+        "length":      len(pwd),
+        "charset":     charset_size(pwd),
+        "log10":       round(log10, 2),
+        "metric":      metric,
+        "deceptive":   dec,
+        "real":        real,
+        "gap":         gap,
+    }
 
-def metric_gap(log10_bf: float, rule_attempts) -> str:
-    """
-    Measures the gap between what entropy metrics predict vs rule-based reality.
-    Returns 'Overestimated', 'Accurate', or N/A.
-    """
-    if rule_attempts is None:
-        return "Accurate"
-    metric_label   = strength_label(log10_bf)
-    real_label     = real_strength_label(log10_bf, rule_attempts)
-    order = ["Critical", "Weak", "Moderate", "Strong"]
-    diff = order.index(metric_label) - order.index(real_label)
-    if diff >= 2:   return "Overestimated ⚠ ⚠"
-    if diff == 1:   return "Overestimated ⚠"
-    return "Accurate"
+# ── Load data ──────────────────────────────────────────────────────────────────
 
+def load_passwords(filepath, limit=1000):
+    passwords = []
+    try:
+        with open(filepath, encoding="utf-8", errors="ignore") as f:
+            if filepath.endswith(".csv"):
+                reader = csv.DictReader(f)
+                for row in reader:
+                    passwords.append(row["password"])
+                    if len(passwords) >= limit:
+                        break
+            else:
+                # plain text, one password per line
+                for line in f:
+                    pwd = line.strip()
+                    if pwd:
+                        passwords.append(pwd)
+                    if len(passwords) >= limit:
+                        break
+    except FileNotFoundError:
+        print(f"File not found: {filepath}")
+        sys.exit(1)
+    return passwords
 
-def format_time(seconds: float) -> str:
-    if seconds < 1:           return "< 1 second"
-    if seconds < 60:          return f"{seconds:.1f} seconds"
-    if seconds < 3600:        return f"{seconds/60:.1f} minutes"
-    if seconds < 86400:       return f"{seconds/3600:.1f} hours"
-    if seconds < 86400*365:   return f"{seconds/86400:.1f} days"
-    if seconds < 86400*365*1000: return f"{seconds/(86400*365):.1f} years"
-    return f"{seconds/(86400*365):.2e} years"
+# ── Analysis & reporting ───────────────────────────────────────────────────────
 
-
-# ── Analysis ───────────────────────────────────────────────────────────────────
-
-def analyze():
-    results = []
-    for pwd, category, charset, dict_risk, dict_attempts, rule_attempts in PASSWORDS:
-        length  = len(pwd)
-        space   = brute_force_space(charset, length)
-        log10   = log10_space(space)
-        time_s  = estimated_time_seconds(space)
-
-        results.append({
-            "password":           pwd,
-            "category":           category,
-            "length":             length,
-            "charset_size":       charset,
-            "dict_risk":          dict_risk,
-            "dict_attempts":      dict_attempts if dict_attempts else "N/A",
-            "rule_attempts":      rule_attempts if rule_attempts else "N/A",
-            "bf_space":           f"~{space:.2e}",
-            "log10_space":        round(log10, 2),
-            "bf_time_est":        format_time(time_s),
-            "metric_strength":    strength_label(log10),
-            "real_strength":      real_strength_label(log10, rule_attempts),
-            "metric_gap":         metric_gap(log10, rule_attempts),
-        })
+def run_analysis(passwords):
+    results = [analyze_password(p) for p in passwords]
     return results
 
+def print_report(results):
+    n = len(results)
+    print(f"\n{'='*60}")
+    print(f"  LARGE-SCALE PASSWORD ANALYSIS — {n} passwords")
+    print(f"{'='*60}\n")
 
-# ── Output ─────────────────────────────────────────────────────────────────────
+    # Distribution by metric strength
+    metric_counts = collections.Counter(r["metric"] for r in results)
+    print("Metric strength distribution:")
+    for label in ["Critical","Weak","Moderate","Strong"]:
+        count = metric_counts.get(label, 0)
+        pct   = count / n * 100
+        bar   = "█" * int(pct / 2)
+        print(f"  {label:<10} {count:>5} ({pct:5.1f}%)  {bar}")
 
-def print_table(results):
-    print("\nA Computational Study of Password Strength")
-    print("Simulation-based model — no live systems used\n")
+    # Deceptive passwords
+    deceptive = [r for r in results if r["deceptive"]]
+    print(f"\nDeceptive passwords (score >= Moderate but have dict base word):")
+    print(f"  Found: {len(deceptive)} / {n} ({len(deceptive)/n*100:.1f}%)")
 
-    # Main table
-    header = f"{'Password':<14} {'Category':<12} {'log10':>6} {'Metric':>10} {'Real':>10} {'Gap':<22} {'BF time (10⁹/s)'}"
-    print(header)
-    print("-" * len(header))
-    for r in results:
-        gap = r["metric_gap"]
-        print(f"{r['password']:<14} {r['category']:<12} {r['log10_space']:>6} "
-              f"{r['metric_strength']:>10} {r['real_strength']:>10} {gap:<22} {r['bf_time_est']}")
+    # Among those scoring Moderate or Strong — how many are deceptive?
+    high_score = [r for r in results if r["metric"] in ("Moderate","Strong")]
+    if high_score:
+        dec_among_high = [r for r in high_score if r["deceptive"]]
+        pct_false      = len(dec_among_high) / len(high_score) * 100
+        print(f"\n  Of passwords scoring Moderate/Strong ({len(high_score)} total):")
+        print(f"  → {len(dec_among_high)} ({pct_false:.1f}%) are deceptive")
+        print(f"  → {len(high_score)-len(dec_among_high)} ({100-pct_false:.1f}%) are genuinely strong")
 
-    # Deceptive focus
-    print("\n── Deceptive passwords: metric score vs rule-based attempts ──")
-    print(f"{'Password':<14} {'Metric strength':>16} {'Rule attempts':>14} {'Real strength':>14}")
-    print("-" * 62)
-    for r in results:
-        if r["category"] == "Deceptive":
-            print(f"{r['password']:<14} {r['metric_strength']:>16} "
-                  f"{str(r['rule_attempts']):>14} {r['real_strength']:>14}")
+    # Length vs strength — the unexpected finding
+    print(f"\nLength vs real strength (the unexpected finding):")
+    long_weak = [r for r in results if r["length"] >= 8 and r["real"] in ("Critical","Weak")]
+    short_ok  = [r for r in results if r["length"] <= 6 and r["metric"] == "Critical"]
+    print(f"  Passwords with length >= 8 that are still Critical/Weak: {len(long_weak)} ({len(long_weak)/n*100:.1f}%)")
+    print(f"  Passwords with length <= 6 that are Critical: {len(short_ok)} ({len(short_ok)/n*100:.1f}%)")
+    if long_weak:
+        avg_log10_long_weak = sum(r["log10"] for r in long_weak) / len(long_weak)
+        print(f"  Avg entropy score of long-but-weak passwords: {avg_log10_long_weak:.2f} log10")
+        print(f"  → These score '{strength_label(avg_log10_long_weak)}' on entropy meters but are predictable")
 
-    # Category summary
-    print("\nCategory summary (avg log10 brute-force space):")
-    print("-" * 50)
-    from collections import defaultdict
-    cats = defaultdict(list)
-    for r in results:
-        cats[r["category"]].append(r["log10_space"])
-    for cat, logs in cats.items():
-        avg = sum(logs) / len(logs)
-        bar = "█" * int(avg)
-        print(f"  {cat:<12}  log10 ≈ {avg:5.1f}  {bar}")
-    print()
+    # Deceptive examples
+    if deceptive:
+        print(f"\nTop deceptive password examples (entropy says strong, reality says critical):")
+        shown = sorted(deceptive, key=lambda r: -r["log10"])[:8]
+        print(f"  {'Password':<20} {'log10':>6}  {'Metric':<10} {'Real':<10}")
+        print(f"  {'-'*50}")
+        for r in shown:
+            print(f"  {r['password']:<20} {r['log10']:>6}  {r['metric']:<10} {r['real']:<10}")
 
+    # Summary verdict
+    print(f"\n{'─'*60}")
+    print(f"KEY FINDING:")
+    if high_score and dec_among_high:
+        pct = len(dec_among_high) / len(high_score) * 100
+        print(f"  {pct:.1f}% of passwords scoring Moderate/Strong on entropy metrics")
+        print(f"  are deceptive — they have a recognizable dictionary base word")
+        print(f"  and would be cracked quickly by rule-based attacks.")
+        print(f"\n  Entropy metrics overestimate security for these passwords.")
+        print(f"  Length alone does not guarantee resistance to rule-based attacks.")
+    print(f"{'='*60}\n")
 
-def save_csv(results, path="results/results.csv"):
+def save_results(results, path="results/large_results.csv"):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=results[0].keys())
         writer.writeheader()
         writer.writerows(results)
-    print(f"Results saved to {path}")
-
+    print(f"Full results saved to {path}")
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    results = analyze()
-    print_table(results)
-    save_csv(results)
+    parser = argparse.ArgumentParser(description="Large-scale password analysis")
+    parser.add_argument("--file",  default="data/passwords_large.csv", help="Password file (.csv or plain text)")
+    parser.add_argument("--limit", type=int, default=1000,             help="Max passwords to analyze")
+    args = parser.parse_args()
+
+    print(f"Loading passwords from: {args.file} (limit: {args.limit})")
+    passwords = load_passwords(args.file, args.limit)
+    print(f"Loaded {len(passwords)} passwords")
+
+    results = run_analysis(passwords)
+    print_report(results)
+    save_results(results)
