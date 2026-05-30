@@ -7,35 +7,49 @@ No live systems or real cracking tools were used.
 
 ## Full Dataset
 
-| Password | Category | Length | Charset | Dict risk | Dict attempts | BF space | log₁₀ | BF time (10⁹/s) | Strength |
-|---|---|---|---|---|---|---|---|---|---|
-| `123456` | Simple | 6 | 10 | Very high | 1 | ~10⁶ | 6.0 | < 1 second | **Critical** |
-| `qwerty` | Simple | 6 | 26 | Very high | 2 | ~3×10⁸ | 8.5 | < 1 second | **Critical** |
-| `password` | Simple | 8 | 26 | Very high | 4 | ~2×10¹¹ | 11.3 | ~3 minutes | **Weak** |
-| `Anna2005` | Name/year | 8 | 36 | High | ~5,000 | ~2.8×10¹² | 12.5 | ~47 minutes | **Weak** |
-| `Mike1998` | Name/year | 8 | 36 | High | ~5,000 | ~2.8×10¹² | 12.5 | ~47 minutes | **Weak** |
-| `Alex2001` | Name/year | 8 | 36 | High | ~5,000 | ~2.8×10¹² | 12.5 | ~47 minutes | **Weak** |
-| `S0lar!X9` | Complex | 8 | ~72 | Medium | N/A | ~7×10¹⁴ | 14.9 | ~8 days | **Moderate** |
-| `X7#kP2!zQ` | Random | 9 | 94 | Very low | N/A | ~5×10¹⁷ | 17.8 | ~18 years | **Strong** |
-| `@mR4$vN8!p` | Random | 10 | 94 | Very low | N/A | ~5×10¹⁹ | 19.7 | ~1,700 years | **Strong** |
+| Password | Category | Length | Charset | Dict risk | Rule attempts | BF space | log₁₀ | Metric strength | Real strength | Gap |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `123456` | Simple | 6 | 10 | Very high | 1 | ~10⁶ | 6.0 | Critical | Critical | Accurate |
+| `qwerty` | Simple | 6 | 26 | Very high | 2 | ~3×10⁸ | 8.5 | Critical | Critical | Accurate |
+| `password` | Simple | 8 | 26 | Very high | 4 | ~2×10¹¹ | 11.3 | Weak | Critical | Overestimated ⚠ |
+| `Anna2005` | Name/year | 8 | 36 | High | ~5,000 | ~2.8×10¹² | 12.5 | Weak | Weak | Accurate |
+| `Mike1998` | Name/year | 8 | 36 | High | ~5,000 | ~2.8×10¹² | 12.5 | Weak | Weak | Accurate |
+| `Alex2001` | Name/year | 8 | 36 | High | ~5,000 | ~2.8×10¹² | 12.5 | Weak | Weak | Accurate |
+| `S0lar!X9` | Complex | 8 | ~72 | Medium | N/A | ~7×10¹⁴ | 14.9 | Moderate | Moderate | Accurate |
+| `X7#kP2!zQ` | Random | 9 | 94 | Very low | N/A | ~5×10¹⁷ | 17.8 | Strong | Strong | Accurate |
+| `@mR4$vN8!p` | Random | 10 | 94 | Very low | N/A | ~5×10¹⁹ | 19.7 | Strong | Strong | Accurate |
+| `P@ssw0rd` | **Deceptive** | 8 | 72 | Very high | **23** | ~7×10¹⁴ | 14.9 | Moderate | **Critical** | **Overestimated ⚠⚠** |
+| `S3cur1ty!` | **Deceptive** | 9 | 72 | Very high | **31** | ~5×10¹⁶ | 16.7 | Strong | **Critical** | **Overestimated ⚠⚠** |
+| `Adm1n@2024` | **Deceptive** | 10 | 72 | Very high | **48** | ~4×10¹⁸ | 18.6 | Strong | **Critical** | **Overestimated ⚠⚠** |
+| `Tr0ub4dor&3` | **Deceptive** | 11 | 72 | Medium | **120** | ~3×10²⁰ | 20.4 | Strong | **Weak** | **Overestimated ⚠⚠** |
+
+---
+
+## Key Finding: The Deceptive Password Problem
+
+Entropy-based metrics **systematically overestimate** the security of structured substitution passwords:
+
+| Password | Metric says | Reality | Orders of magnitude off |
+|---|---|---|---|
+| `P@ssw0rd` | Moderate (~10¹⁵ attempts) | Critical (23 attempts) | **~13 orders** |
+| `S3cur1ty!` | Strong (~10¹⁷ attempts) | Critical (31 attempts) | **~15 orders** |
+| `Adm1n@2024` | Strong (~10¹⁸ attempts) | Critical (48 attempts) | **~16 orders** |
+
+> Standard entropy metrics can overestimate real-world password security by up to **16 orders of magnitude** when passwords follow predictable substitution patterns.
 
 ---
 
 ## Category Summary
 
-| Category | Dict cracked? | Avg log₁₀ complexity | Estimated resistance |
-|---|---|---|---|
-| Simple | Yes | ~8.6 | Very weak |
-| Name/year | Yes | ~12.5 | Weak |
-| Complex | No | ~14.9 | Moderate |
-| Random | No | ~18.7 | Strong |
+| Category | Dict cracked? | Avg log₁₀ | Metric resistance | Real resistance |
+|---|---|---|---|---|
+| Simple | Yes | ~8.6 | Very weak | Very weak |
+| Name/year | Yes | ~12.4 | Weak | Weak |
+| Complex | No | ~14.9 | Moderate | Moderate |
+| **Deceptive** | **Yes (rule-based)** | **~17.6** | **Strong** | **Critical–Weak** |
+| Random | No | ~18.7 | Strong | Strong |
 
 ---
 
-## Key Finding
-
-Moving from Simple → Random increases the brute-force search space by **~10¹⁰ times**.  
-Structure and randomness matter more than length alone.
-
-> Strength classification is derived from logarithmic brute-force space thresholds  
-> and is used as a comparative metric, not an absolute security guarantee.
+> Strength classification derived from log₁₀ brute-force space thresholds —  
+> used as a comparative metric, not an absolute security guarantee.
