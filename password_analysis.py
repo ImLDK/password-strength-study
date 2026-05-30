@@ -5,7 +5,7 @@ Extended: The Deceptive Password Problem — entropy metrics vs rule-based attac
 
 Simulation-based combinatorial analysis — no live systems or real cracking tools used.
 
-Author: ImLDK
+Author: Yelisey Yakymenko
 Year:   2025
 """
 
